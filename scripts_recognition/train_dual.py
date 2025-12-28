@@ -39,7 +39,7 @@ class LateFusionNetwork(nn.Module):
         return self.fusion_head(torch.cat((feat_seq, feat_img), dim=1))
 
 # ==========================================
-# 2. 双模态数据集 (移除 CPU 加粗)
+# 2. 双模态数据集
 # ==========================================
 class DualModalDataset(Dataset):
     def __init__(self, data_root, mode='train', max_len=196, logger=None):
@@ -69,7 +69,6 @@ class DualModalDataset(Dataset):
                         'label': label
                     })
 
-        # 【优化】移除 ThickenLines
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
@@ -143,7 +142,7 @@ def train_fusion():
             total_loss += loss.item()
             _, pred = torch.max(out, 1)
             correct += (pred == labels).sum().item(); total += labels.size(0)
-            if i % 100 == 0: print(f"Epoch {epoch+1} Step {i} Loss: {loss.item():.4f}", end='\r')
+            if i % 100 == 0: print(f"Epoch {epoch+1} Step {i}/{len(train_loader)} Loss: {loss.item():.4f}", end='\r')
 
         train_acc = 100 * correct / total
         avg_loss = total_loss / len(train_loader)
@@ -167,4 +166,5 @@ def train_fusion():
             logger.info(f"Saved Best Dual Model: {test_acc:.2f}%")
 
 if __name__ == '__main__':
+
     train_fusion()
