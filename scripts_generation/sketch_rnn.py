@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import PIL
@@ -365,18 +366,25 @@ def sample_bivariate_normal(mu_x,mu_y,sigma_x,sigma_y,rho_xy, greedy=False):
 
 def make_image(sequence, epoch, name='_output_'):
     """plot drawing with separated strokes"""
+    
+    # 确保目标目录存在
+    output_dir = 'test_sketch'
+    os.makedirs(output_dir, exist_ok=True)
+    
     strokes = np.split(sequence, np.where(sequence[:,2]>0)[0]+1)
     fig = plt.figure()
     ax1 = fig.add_subplot(111)
     for s in strokes:
         plt.plot(s[:,0],-s[:,1])
-    canvas = plt.get_current_fig_manager().canvas
+    canvas = plt.get_current_figmanager().canvas
     canvas.draw()
     pil_image = PIL.Image.frombytes('RGB', canvas.get_width_height(),
                  canvas.tostring_rgb() if hasattr(canvas, 'tostring_rgb') else canvas.buffer_rgba())
-    name = str(epoch)+name+'.jpg'
-    pil_image.save(name,"JPEG")
+    # 构建完整的保存路径
+    save_path = os.path.join(output_dir, str(epoch)+name+'.jpg')
+    pil_image.save(save_path, "JPEG")
     plt.close("all")
+
 
 if __name__=="__main__":
     model = Model()
