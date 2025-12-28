@@ -52,7 +52,6 @@ def collate_fn(batch):
 # 2. 训练主程序
 # ==========================================
 def train_unimodal():
-    # 注意：这里 name_prefix 决定了日志文件名
     logger, _ = get_logger('../logs', name_prefix='train_npy_best') 
     logger.info(f"=== 单模态序列训练开始: {datetime.now()} ===")
     
@@ -115,4 +114,5 @@ def train_unimodal():
             logger.info(f"Saved Best Model: {test_acc:.2f}%")
 
 if __name__ == '__main__':
+
     train_unimodal()
