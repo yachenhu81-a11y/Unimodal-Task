@@ -30,7 +30,6 @@ class FastSketchDataset(Dataset):
         
         if logger: logger.info(f"[{mode}] 正在将图片加载到内存")
         
-        # --- 核心优化：预加载所有图片到内存 ---
         count = 0
         for cls_name in self.classes:
             cls_folder = os.path.join(self.base_dir, cls_name)
@@ -49,8 +48,6 @@ class FastSketchDataset(Dataset):
                 
         if logger: logger.info(f"\n[{mode}] 加载完成! 共 {len(self.samples)} 张。")
             
-        # --- 核心优化：尺寸降为 112x112 ---
-        # 224 -> 112，像素量减少了4倍，速度飞起，且不影响草图识别
         self.img_size = 112 
         
         self.transform = transforms.Compose([
@@ -61,13 +58,11 @@ class FastSketchDataset(Dataset):
         
         if mode == 'train': 
             self.transform.transforms.insert(2, transforms.RandomHorizontalFlip())
-            # 旋转稍微耗时，如果不追求极限数据增强，可以注释掉下面这行
             self.transform.transforms.insert(3, transforms.RandomRotation(10))
 
     def __len__(self): return len(self.samples)
 
     def __getitem__(self, idx):
-        # 从内存直接解码，无需磁盘 IO
         img_bytes, label = self.samples[idx]
         try:
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
@@ -85,9 +80,6 @@ def train_img_fast():
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # --- 核心优化：加大 Batch Size ---
-    # 图片变小了，Batch Size 可以翻倍到 256 甚至 512
-    # 如果显存不够报错，就改回 128
     BATCH_SIZE = 256 
     
     train_ds = FastSketchDataset('../data/QuickDraw414k', 'train', logger)
@@ -95,7 +87,6 @@ def train_img_fast():
     
     if len(train_ds) == 0: return
     
-    # num_workers 可以稍微降低，因为数据已经在内存里了，CPU压力小了
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
     test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
     
@@ -109,19 +100,17 @@ def train_img_fast():
     criterion = nn.CrossEntropyLoss()
     
     best_acc = 0.0
-    # 因为跑得快，我们可以多跑几轮，比如 30-40 轮
     for epoch in range(30):
         model.train()
         correct = 0; total = 0; total_loss = 0
         
-        # 进度条优化
         start_time = datetime.now()
         
         for i, (imgs, labels) in enumerate(train_loader):
             imgs, labels = imgs.to(DEVICE), labels.to(DEVICE)
             
             optimizer.zero_grad()
-            out = model(imgs) # GPU 加粗在这里自动发生
+            out = model(imgs)
             loss = criterion(out, labels)
             loss.backward()
             optimizer.step()
@@ -158,4 +147,5 @@ def train_img_fast():
             logger.info(f"Saved Best: {test_acc:.2f}%")
 
 if __name__ == '__main__':
+
     train_img_fast()
