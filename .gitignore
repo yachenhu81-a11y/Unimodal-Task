@@ -1,0 +1,13 @@
+# 忽略整个数据文件夹
+data/
+# 忽略所有生成的草图和中间结果
+scripts_generation/test_sketch
+
+# 忽略所有模型权重文件 (不管在哪)
+*.pth
+
+logs/
+
+*.txt
+!requirements.txt
+__pycache__/
