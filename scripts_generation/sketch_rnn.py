@@ -16,17 +16,15 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class HParams():
     def __init__(self):
         # 获取当前脚本文件(sketch_rnn.py)所在的目录
-        # 例如: E:\code\...\Unimodal-Task\scripts_generation
         self.script_dir = os.path.dirname(os.path.abspath(__file__))
         
         # 获取项目根目录 (脚本目录的上一级)
-        # 例如: E:\code\...\Unimodal-Task
         self.project_root = os.path.dirname(self.script_dir)
         
-        # 1. 数据路径配置: ../data/QuickDraw_generation
+        # 1. 数据路径配置
         self.data_dir = os.path.join(self.project_root, 'data', 'QuickDraw_generation')
         
-        # 2. 输出路径配置: ./test_sketch (与脚本同级)
+        # 2. 输出路径配置
         self.output_dir = os.path.join(self.script_dir, 'test_sketch')
         
         # 确保输出目录存在
@@ -35,7 +33,7 @@ class HParams():
         print(f"Data Dir: {self.data_dir}")
         print(f"Output Dir: {self.output_dir}")
 
-        # 想要训练的类别列表 (请确保这8个文件都在data目录下)
+        # 想要训练的类别列表
         self.categories = ['cat', 'apple', 'bus', 'angel', 'clock', 'pig', 'sheep', 'umbrella'] 
         
         # 模型参数
@@ -77,7 +75,7 @@ def purify(strokes):
     return data
 
 def calculate_normalizing_scale_factor(strokes):
-    """Calculate the normalizing factor explained in appendix of sketch-rnn."""
+    """Calculate the normalizing factor based ONLY on training data."""
     data = []
     for i in range(len(strokes)):
         for j in range(len(strokes[i])):
@@ -86,22 +84,44 @@ def calculate_normalizing_scale_factor(strokes):
     data = np.array(data)
     return np.std(data)
 
-def normalize(strokes, scale_factor=None):
-    """Normalize entire dataset (delta_x, delta_y) by the scaling factor."""
-    if scale_factor is None:
-        scale_factor = calculate_normalizing_scale_factor(strokes)
-    
+def normalize(strokes, scale_factor):
+    """Normalize dataset (delta_x, delta_y) by the scaling factor."""
     normalized_data = []
     for seq in strokes:
         n_seq = seq.copy()
         n_seq[:, 0:2] /= scale_factor
         normalized_data.append(n_seq)
-    return normalized_data, scale_factor
+    return normalized_data
 
-def load_dataset():
-    """Load and mix data from all categories specified in hp.categories"""
-    all_strokes = []
-    all_labels = []
+def split_dataset(data, train_ratio=0.90, valid_ratio=0.05):
+    """
+    Splits data into Train, Valid, and Test sets.
+    Standard: 90% Train, 5% Valid, 5% Test.
+    """
+    n_total = len(data)
+    # Shuffle indices
+    indices = np.random.permutation(n_total)
+    
+    n_train = int(n_total * train_ratio)
+    n_valid = int(n_total * valid_ratio)
+    # Remaining goes to test
+    
+    train_idx = indices[:n_train]
+    valid_idx = indices[n_train:n_train + n_valid]
+    test_idx = indices[n_train + n_valid:]
+    
+    # Use list comprehension to create new lists
+    train_set = [data[i] for i in train_idx]
+    valid_set = [data[i] for i in valid_idx]
+    test_set = [data[i] for i in test_idx]
+    
+    return train_set, valid_set, test_set
+
+def load_and_split_dataset():
+    """Load, purify, split, and normalize data."""
+    # Temporary lists to hold data for each split
+    raw_train, raw_valid, raw_test = [], [], []
+    lbl_train, lbl_valid, lbl_test = [], [], []
 
     print(f"Loading data from {hp.data_dir}...")
     
@@ -113,49 +133,55 @@ def load_dataset():
             
         try:
             dataset = np.load(file_path, encoding='latin1', allow_pickle=True)
-            # 这里我们只取 'train' 部分
             raw_data = dataset['train']
             
-            # Step 1: Purify (filter bad sequences)
+            # 1. Purify
             purified_data = purify(raw_data)
             
-            # Add to list
-            all_strokes.extend(purified_data)
-            # Extend labels list with the category name
-            all_labels.extend([cat_name] * len(purified_data))
+            # 2. Split (90/5/5) for THIS category
+            cat_train, cat_valid, cat_test = split_dataset(purified_data)
             
-            print(f"Loaded {cat_name}: {len(purified_data)} samples.")
+            # 3. Accumulate
+            raw_train.extend(cat_train)
+            raw_valid.extend(cat_valid)
+            raw_test.extend(cat_test)
+            
+            # Accumulate labels
+            lbl_train.extend([cat_name] * len(cat_train))
+            lbl_valid.extend([cat_name] * len(cat_valid))
+            lbl_test.extend([cat_name] * len(cat_test))
+            
+            print(f"Loaded {cat_name}: Train={len(cat_train)}, Valid={len(cat_valid)}, Test={len(cat_test)}")
             
         except Exception as e:
             print(f"Error loading {cat_name}: {e}")
 
-    if not all_strokes:
-        raise ValueError("No data loaded! Please check your data path and category names.")
+    if not raw_train:
+        raise ValueError("No data loaded!")
 
-    # Step 2: Global Normalize
-    # Calculate one scale factor for ALL data to maintain consistency
-    print("Calculating global normalization factor...")
-    norm_data, scale_factor = normalize(all_strokes)
+    # 4. Global Normalize
+    # IMPORTANT: Calculate scale factor ONLY on TRAIN set to avoid data leakage
+    print("Calculating global normalization factor on TRAINING set...")
+    scale_factor = calculate_normalizing_scale_factor(raw_train)
     
-    print(f"Total dataset size: {len(norm_data)}. Scale factor: {scale_factor:.4f}")
+    print(f"Normalizing datasets with scale factor: {scale_factor:.4f}")
+    norm_train = normalize(raw_train, scale_factor)
+    norm_valid = normalize(raw_valid, scale_factor)
+    norm_test = normalize(raw_test, scale_factor)
     
-    return norm_data, all_labels
+    return norm_train, lbl_train, norm_valid, lbl_valid, norm_test, lbl_test
 
-# Load Data Global Variables
-train_data, train_labels = load_dataset()
-Nmax = max_size(train_data)
+# Load Data and Create Global Variables
+train_data, train_labels, valid_data, valid_labels, test_data, test_labels = load_and_split_dataset()
+Nmax = max_size(train_data) # Use max size of training data as reference
 
 ############################## Batch Generation
-def make_batch(batch_size):
+def make_batch(batch_size, data_source, label_source=None):
     """
-    Randomly sample a batch from the mixed dataset.
-    Returns:
-        batch: tensor (max_len, batch_size, 5)
-        lengths: list of sequence lengths
-        indices: indices of the sampled data (used for tracking labels during inference)
+    Randomly sample a batch from the specified data_source.
     """
-    batch_idx = np.random.choice(len(train_data), batch_size)
-    batch_sequences = [train_data[idx] for idx in batch_idx]
+    batch_idx = np.random.choice(len(data_source), batch_size)
+    batch_sequences = [data_source[idx] for idx in batch_idx]
     
     strokes = []
     lengths = []
@@ -174,15 +200,14 @@ def make_batch(batch_size):
     batch = torch.from_numpy(np.stack(strokes, 1)).float().to(device)
     return batch, lengths, batch_idx
 
-################################ Adaptive LR
+################################ Adaptive LR (Unchanged)
 def lr_decay(optimizer):
-    """Decay learning rate by a factor of lr_decay"""
     for param_group in optimizer.param_groups:
         if param_group['lr'] > hp.min_lr:
             param_group['lr'] *= hp.lr_decay
     return optimizer
 
-################################# Encoder and Decoder Modules
+################################# Encoder and Decoder Modules (Unchanged)
 class EncoderRNN(nn.Module):
     def __init__(self):
         super(EncoderRNN, self).__init__()
@@ -266,23 +291,47 @@ class Model():
         p = torch.stack([p1, p2, p3], 2)
         return mask, dx, dy, p
 
+    def evaluate_validation_set(self):
+        """Calculates loss on a batch of validation data."""
+        self.encoder.eval()
+        self.decoder.eval()
+        
+        # Sample a batch from validation data
+        batch, lengths, _ = make_batch(hp.batch_size, valid_data)
+        
+        with torch.no_grad():
+            z, self.mu, self.sigma = self.encoder(batch, hp.batch_size)
+            sos = torch.stack([torch.tensor([0,0,1,0,0])]*hp.batch_size).to(device).unsqueeze(0)
+            batch_init = torch.cat([sos, batch], 0)
+            z_stack = torch.stack([z]*(Nmax+1))
+            inputs = torch.cat([batch_init, z_stack], 2)
+            
+            self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, \
+                self.rho_xy, self.q, _, _ = self.decoder(inputs, z)
+            
+            mask, dx, dy, p = self.make_target(batch, lengths)
+            LKL = self.kullback_leibler_loss()
+            LR = self.reconstruction_loss(mask, dx, dy, p, None)
+            loss = LR + LKL
+            
+        self.encoder.train()
+        self.decoder.train()
+        return loss.item()
+
     def train(self, epoch):
         self.encoder.train()
         self.decoder.train()
         
-        batch, lengths, _ = make_batch(hp.batch_size)
+        # Train on TRAIN data
+        batch, lengths, _ = make_batch(hp.batch_size, train_data)
         
-        # encode:
         z, self.mu, self.sigma = self.encoder(batch, hp.batch_size)
-        # create start of sequence:
         sos = torch.stack([torch.tensor([0,0,1,0,0])]*hp.batch_size).to(device).unsqueeze(0)
         batch_init = torch.cat([sos, batch], 0)
         z_stack = torch.stack([z]*(Nmax+1))
         inputs = torch.cat([batch_init, z_stack], 2)
-        # decode:
         self.pi, self.mu_x, self.mu_y, self.sigma_x, self.sigma_y, \
             self.rho_xy, self.q, _, _ = self.decoder(inputs, z)
-        # prepare targets:
         mask, dx, dy, p = self.make_target(batch, lengths)
         
         self.encoder_optimizer.zero_grad()
@@ -299,15 +348,21 @@ class Model():
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
 
+        # Update LR
         if epoch % 100 == 0:
-            print('epoch', epoch, 'loss', loss.item(), 'LR', LR.item(), 'LKL', LKL.item())
             self.encoder_optimizer = lr_decay(self.encoder_optimizer)
             self.decoder_optimizer = lr_decay(self.decoder_optimizer)
+
+        # Print Train/Valid Loss every 100 epochs
+        if epoch % 200 == 0:
+            valid_loss = self.evaluate_validation_set()
+            print(f'Epoch {epoch} | Train Loss: {loss.item():.4f} | Valid Loss: {valid_loss:.4f} | LKL: {LKL.item():.4f}')
         
-        if epoch % 500 == 0:
-            self.conditional_generation(epoch)
+        # Conditional Generation (using Test set sample)
+        if epoch % 5000 == 0:
+            self.conditional_generation(epoch, data_source=test_data, label_source=test_labels)
             
-        if epoch % 15000 == 0 and epoch > 0:
+        if epoch % 80000 == 0 and epoch > 0:
             self.save(epoch)
 
     def bivariate_normal_pdf(self, dx, dy):
@@ -333,7 +388,6 @@ class Model():
         return hp.wKL*self.eta_step * torch.max(LKL, KL_min)
 
     def save(self, epoch):
-        # 保存到指定目录
         enc_path = os.path.join(hp.output_dir, f'encoder_epoch_{epoch}.pth')
         dec_path = os.path.join(hp.output_dir, f'decoder_epoch_{epoch}.pth')
         torch.save(self.encoder.state_dict(), enc_path)
@@ -346,17 +400,17 @@ class Model():
         self.encoder.load_state_dict(saved_encoder)
         self.decoder.load_state_dict(saved_decoder)
 
-    def conditional_generation(self, epoch):
+    def conditional_generation(self, epoch, data_source, label_source):
         """
-        Modified to perform inference on a random sample from the dataset.
-        Saves both the original (Ground Truth) and the Reconstructed image.
+        Samples one sketch from data_source (e.g., TEST set),
+        reconstructs it, and saves both images.
         """
-        # 1. Randomly sample 1 real data point
-        batch, lengths, idx_list = make_batch(1)
+        # 1. Randomly sample 1 real data point from specified source
+        batch, lengths, idx_list = make_batch(1, data_source)
         idx = idx_list[0]
-        label_name = train_labels[idx]
+        label_name = label_source[idx]
         
-        print(f"\n[Inference] Epoch {epoch}: Processing a sketch of category: '{label_name}'")
+        print(f"\n[Inference] Epoch {epoch}: Processing a sketch of category: '{label_name}' (From Test/Validation Set)")
 
         self.encoder.train(False)
         self.decoder.train(False)
@@ -395,12 +449,12 @@ class Model():
         original_seq_raw = batch.squeeze(1).cpu().numpy()
         orig_x = np.cumsum(original_seq_raw[:, 0], 0)
         orig_y = np.cumsum(original_seq_raw[:, 1], 0)
-        orig_z = original_seq_raw[:, 3] # p2 column (pen lifted)
+        orig_z = original_seq_raw[:, 3] 
         original_sequence = np.stack([orig_x, orig_y, orig_z]).T
 
         # 6. Save Images
-        make_image(original_sequence, epoch, name=f'_{label_name}_original', color='green')
-        make_image(generated_sequence, epoch, name=f'_{label_name}_generated', color='blue')
+        make_image(original_sequence, epoch, name=f'_{label_name}_GT', color='green')
+        make_image(generated_sequence, epoch, name=f'_{label_name}_Recon', color='blue')
         
         self.encoder.train(True)
         self.decoder.train(True)
@@ -443,10 +497,6 @@ def sample_bivariate_normal(mu_x, mu_y, sigma_x, sigma_y, rho_xy, greedy=False):
     return x[0][0], x[0][1]
 
 def make_image(sequence, epoch, name='_output_', color='blue'):
-    """
-    Plot drawing with separated strokes
-    sequence: [x_abs, y_abs, pen_lifted_boolean]
-    """
     split_indices = np.where(sequence[:, 2] > 0)[0] + 1
     strokes = np.split(sequence, split_indices)
     
@@ -483,20 +533,21 @@ if __name__=="__main__":
     model = Model()
     
     print("Start Training...")
-    # 训练循环
-    # for epoch in range(15001):
+    # 训练循环 (15000 epochs)
+    # for epoch in range(80001):
     #     model.train(epoch)
     
-    # 训练结束后，加载保存的模型进行一次最终测试
+    # 训练结束后，使用 TEST 集进行最终测试
     try:
-        print("Loading final model for demonstration...")
-        final_epoch = 15000
+        print("Loading final model for demonstration on TEST data...")
+        final_epoch = 80000
         enc_path = os.path.join(hp.output_dir, f'encoder_epoch_{final_epoch}.pth')
         dec_path = os.path.join(hp.output_dir, f'decoder_epoch_{final_epoch}.pth')
         
         if os.path.exists(enc_path) and os.path.exists(dec_path):
             model.load(enc_path, dec_path)
-            model.conditional_generation(final_epoch + 1)
+            # 使用 test_data 进行生成
+            model.conditional_generation(final_epoch + 1, data_source=test_data, label_source=test_labels)
         else:
             print("Checkpoint not found, skipping final loading test.")
             
