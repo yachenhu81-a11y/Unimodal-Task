@@ -85,5 +85,5 @@ def plot_sketches(category_name, num_samples=5):
 if __name__ == '__main__':
     # 修改这里来查看不同类别的图
     # 运行后会弹窗，记下你喜欢的图片的 ID
-    plot_sketches('cat', num_samples=5)
+    plot_sketches('apple', num_samples=5)
     plot_sketches('clock', num_samples=5)

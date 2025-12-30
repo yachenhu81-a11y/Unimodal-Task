@@ -7,7 +7,7 @@ scripts_generation/test_sketch
 *.pth
 
 logs/
-*.png
+
 *.txt
 !requirements.txt
 __pycache__/

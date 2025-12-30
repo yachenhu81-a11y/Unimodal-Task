@@ -16,26 +16,26 @@ class HParams():
         self.project_root = os.path.dirname(self.script_dir)
         self.data_dir = os.path.join(self.project_root, 'data', 'QuickDraw_generation')
         
-        # 输出目录：interpolation
-        self.output_dir = os.path.join(self.script_dir, 'interpolation')
+        # --- 修改：输出目录为 reconstruction ---
+        self.output_dir = os.path.join(self.script_dir, 'reconstruction')
         os.makedirs(self.output_dir, exist_ok=True)
         
         self.categories = ['cat', 'apple', 'bus', 'angel', 'clock', 'pig', 'sheep', 'umbrella'] 
         
-        # --- 模型参数 ---
+        # --- 模型参数 (保持一致) ---
         self.enc_hidden_size = 256
         self.dec_hidden_size = 512
         self.Nz = 128
         self.M = 20
         self.dropout = 0.9 
-        self.temperature = 0.4
+        self.temperature = 0.4 # 重建时温度可以稍微低一点以求稳定，或者保持0.4增加多样性
         self.max_seq_length = 200
         
         self.load_epoch = 80000 
 
 hp = HParams()
 
-################################# Model Definition
+################################# Model Definition (保持不变)
 class EncoderRNN(nn.Module):
     def __init__(self):
         super(EncoderRNN, self).__init__()
@@ -83,7 +83,7 @@ class DecoderRNN(nn.Module):
         q = F.softmax(params_pen).view(len_out, -1, 3)
         return pi, mu_x, mu_y, sigma_x, sigma_y, rho_xy, q, hidden, cell
 
-class InterpolationModel():
+class ReconstructionModel():
     def __init__(self):
         self.encoder = EncoderRNN().to(device)
         self.decoder = DecoderRNN().to(device)
@@ -105,8 +105,8 @@ class InterpolationModel():
 
     def generate_from_latent(self, z, scale_factor):
         """
-        生成序列并乘以 scale_factor 进行反归一化，
-        确保生成的图片与 inspect_samples.py 中的原图尺度一致。
+        解码潜变量 z，并进行反归一化。
+        返回格式: [N, 3] -> (Absolute_X, Absolute_Y, Pen_State)
         """
         sos = torch.tensor([0,0,1,0,0], device=device).view(1,1,-1)
         s = sos
@@ -122,7 +122,7 @@ class InterpolationModel():
                 
                 s, dx, dy, pen_down, eos = self.sample_next_state()
                 
-                # --- 关键修改：反归一化 ---
+                # --- 反归一化 ---
                 dx_real = dx * scale_factor
                 dy_real = dy * scale_factor
                 
@@ -132,9 +132,11 @@ class InterpolationModel():
                 
                 if eos: break
         
+        # 计算绝对坐标
         x_sample = np.cumsum(seq_x, 0)
         y_sample = np.cumsum(seq_y, 0)
         z_sample = np.array(seq_z)
+        
         return np.stack([x_sample, y_sample, z_sample]).T
 
     def sample_next_state(self):
@@ -183,16 +185,10 @@ def purify(strokes):
     return data
 
 def prepare_data_dict():
-    """
-    加载数据并计算全局缩放因子 (Scale Factor)。
-    返回:
-        norm_data_by_cat: 归一化后的数据字典 (用于输入模型)
-        scale_factor:     全局缩放因子 (用于反归一化绘图)
-    """
     all_raw_data = []
     data_by_cat = {}
 
-    print("Loading datasets to calculate normalization...")
+    print("Loading datasets to calculate scale factor...")
     for cat in hp.categories:
         path = os.path.join(hp.data_dir, f'{cat}.npz')
         if os.path.exists(path):
@@ -208,17 +204,17 @@ def prepare_data_dict():
     scale_factor = np.std(flat_data)
     print(f"Global Scale Factor: {scale_factor:.4f}")
 
-    # Normalize data in the dictionary
+    # Normalize data
     norm_data_by_cat = {}
     for cat, sequences in data_by_cat.items():
         norm_seqs = []
         for seq in sequences:
             n_seq = seq.copy()
-            n_seq[:, :2] /= scale_factor # 归一化
+            n_seq[:, :2] /= scale_factor
             norm_seqs.append(n_seq)
         norm_data_by_cat[cat] = norm_seqs
         
-    return norm_data_by_cat, scale_factor # 修改：返回 scale_factor
+    return norm_data_by_cat, scale_factor
 
 def make_tensor_input(sequence):
     len_seq = len(sequence[:,0])
@@ -233,20 +229,8 @@ def make_tensor_input(sequence):
 
 def save_plot(sequence, filename, title, color='blue'):
     """
-    绘制并保存图片。
-    sequence: [N, 3] 数组，包含绝对坐标(x,y)或偏移量(dx,dy)？
-    注意：这里传入的 sequence 应该是已经转换成绝对坐标 (cumsum) 后的数据，
-    或者是原始数据列表。
-    inspect_samples 逻辑：先 cumsum 变绝对坐标，再 split。
+    输入: [N, 3] 绝对坐标 (x, y, pen)
     """
-    
-    # 如果传入的是未 cumsum 的数据 (dx, dy)，这里需要额外判断吗？
-    # generate_from_latent 返回的是已经 cumsum 过的。
-    # 原始数据我们也会在 main 里处理成绝对坐标格式传入，或者在这里统一处理？
-    # 为了兼容 inspect_samples 的逻辑，我们假设传入的是绝对坐标 (x, y, pen)。
-    # 但 wait，inspect_samples 里是先 split 再 plot。
-    
-    # 我们统一约定：传入的 sequence 是 [N, 3] (x_abs, y_abs, pen_state)
     abs_x = sequence[:, 0]
     abs_y = sequence[:, 1]
     pen_states = sequence[:, 2]
@@ -258,7 +242,7 @@ def save_plot(sequence, filename, title, color='blue'):
     ax = fig.add_subplot(111)
     for s in strokes:
         if len(s) > 0:
-            # 加上负号，符合屏幕坐标系
+            # Y轴加负号
             plt.plot(s[:, 0], -s[:, 1], color=color, linewidth=2)
     plt.title(title)
     plt.axis('equal')
@@ -267,108 +251,96 @@ def save_plot(sequence, filename, title, color='blue'):
     save_path = os.path.join(hp.output_dir, filename)
     plt.savefig(save_path)
     plt.close()
-    print(f"Saved: {save_path}")
+    print(f"Image Saved: {save_path}")
 
-################################# Main Interpolation Logic
-def main(cat1_name, idx1, cat2_name, idx2, alpha=0.5):
-    # 1. Load Data
-    data_dict, scale_factor = prepare_data_dict() # 获取 scale_factor
+def save_npy(sequence, filename):
+    """
+    保存为 npy 文件
+    输入: [N, 3] 绝对坐标
+    """
+    save_path = os.path.join(hp.output_dir, filename)
+    np.save(save_path, sequence)
+    print(f"Data Saved: {save_path}")
+
+################################# Main Reconstruction Logic
+def reconstruct_sample(cat_name, idx):
+    # 1. 准备数据和缩放因子
+    # 注意：这里会重新加载数据计算scale factor，虽然有点慢但保证准确
+    if not hasattr(reconstruct_sample, "data_cache"):
+         reconstruct_sample.data_cache = prepare_data_dict()
+    data_dict, scale_factor = reconstruct_sample.data_cache
     
-    if cat1_name not in data_dict or cat2_name not in data_dict:
-        print(f"Error: Categories {cat1_name} or {cat2_name} not in dataset.")
+    if cat_name not in data_dict:
+        print(f"Error: Category {cat_name} not found.")
         return
     
-    # 验证 ID 是否越界
-    if idx1 >= len(data_dict[cat1_name]) or idx2 >= len(data_dict[cat2_name]):
-        print("Error: Index out of range.")
+    if idx >= len(data_dict[cat_name]):
+        print(f"Error: Index {idx} out of range for {cat_name}.")
         return
 
-    # 2. Get specific samples by ID
-    print(f"Selecting {cat1_name} ID: {idx1}")
-    print(f"Selecting {cat2_name} ID: {idx2}")
-    
-    seq1_norm = data_dict[cat1_name][idx1] # 归一化后的数据 (用于模型输入)
-    seq2_norm = data_dict[cat2_name][idx2]
-    
-    input1 = make_tensor_input(seq1_norm)
-    input2 = make_tensor_input(seq2_norm)
+    print(f"\nProcessing: {cat_name} (ID: {idx})")
 
-    # 3. Load Model
-    model = InterpolationModel()
+    # 2. 获取原始数据 (Normalized)
+    seq_norm = data_dict[cat_name][idx] 
+    
+    # 3. 转换为 Tensor 输入模型
+    input_tensor = make_tensor_input(seq_norm)
+
+    # 4. 加载模型
+    model = ReconstructionModel()
     if not model.load(hp.load_epoch):
         return
 
-    # 4. Encode
+    # 5. 模型推理 (Encode -> Decode)
     with torch.no_grad():
-        z1, _ = model.encoder(input1, 1) 
-        z2, _ = model.encoder(input2, 1)
-    
-    # 5. Interpolate
-    z_interp = z1 * alpha + z2 * (1 - alpha)
+        z, _ = model.encoder(input_tensor, 1)
+        # 生成重建数据 (已包含反归一化和Cumsum，结果为绝对坐标)
+        recon_absolute = model.generate_from_latent(z, scale_factor)
 
-    # 6. Generate (Decode) & Denormalize
-    # 传入 scale_factor，生成绝对坐标的大尺寸图片
-    recon1 = model.generate_from_latent(z1, scale_factor)
-    recon2 = model.generate_from_latent(z2, scale_factor)
-    recon_interp = model.generate_from_latent(z_interp, scale_factor)
-
-    # 7. Prepare Original Data for Plotting (Denormalize)
-    # 原始数据在 data_dict 里是归一化的偏移量 (dx, dy)。
-    # 我们需要：1. 乘回 scale_factor (变回真实偏移量) 2. cumsum (变回绝对坐标)
-    def prepare_original_for_plot(norm_seq, scale):
+    # 6. 处理原始数据用于保存 (Norm Delta -> Real Delta -> Real Absolute)
+    def denormalize_to_absolute(norm_seq, scale):
         real_seq = norm_seq.copy()
         real_seq[:, :2] *= scale # 反归一化
-        
         abs_x = np.cumsum(real_seq[:, 0])
         abs_y = np.cumsum(real_seq[:, 1])
         return np.stack([abs_x, abs_y, real_seq[:, 2]], axis=1)
 
-    orig1_plot = prepare_original_for_plot(seq1_norm, scale_factor)
-    orig2_plot = prepare_original_for_plot(seq2_norm, scale_factor)
+    orig_absolute = denormalize_to_absolute(seq_norm, scale_factor)
 
-    # 8. Visualization & Save
-    print(f"\n--- Interpolating between {cat1_name} (ID:{idx1}) and {cat2_name} (ID:{idx2}) ---")
+    # 7. 保存文件 (4个文件)
+    # 文件名基础
+    base_name = f"{cat_name}_id{idx}"
+
+    # A. 保存原始数据 npy (绝对坐标)
+    save_npy(orig_absolute, f"original_{base_name}.npy")
     
-    # 保存5张图：原图A -> 重构A -> 插值 -> 重构B -> 原图B
+    # B. 保存重构数据 npy (绝对坐标)
+    save_npy(recon_absolute, f"recon_{base_name}.npy")
     
-    # 1. 原始图 Source A
-    save_plot(orig1_plot, 
-              f'0_original_{cat1_name}_id{idx1}.png', 
-              f'Original: {cat1_name} (ID:{idx1})', 
+    # C. 保存原始图片 png
+    save_plot(orig_absolute, 
+              f"original_{base_name}.png", 
+              f"Original: {cat_name} (ID:{idx})", 
               color='black')
               
-    # 2. 重构图 Source A (AutoEncoder output)
-    save_plot(recon1, 
-              f'1_recon_{cat1_name}_id{idx1}.png', 
-              f'Reconstruction: {cat1_name}', 
-              color='green')
-              
-    # 3. 插值图 Interpolation
-    save_plot(recon_interp, 
-              f'2_interp_{cat1_name}_{cat2_name}.png', 
-              f'Interpolation ({alpha*100}%)', 
-              color='red')
-              
-    # 4. 重构图 Source B
-    save_plot(recon2, 
-              f'3_recon_{cat2_name}_id{idx2}.png', 
-              f'Reconstruction: {cat2_name}', 
+    # D. 保存重构图片 png
+    save_plot(recon_absolute, 
+              f"recon_{base_name}.png", 
+              f"Reconstruction: {cat_name} (ID:{idx})", 
               color='green')
 
-    # 5. 原始图 Source B
-    save_plot(orig2_plot, 
-              f'4_original_{cat2_name}_id{idx2}.png', 
-              f'Original: {cat2_name} (ID:{idx2})', 
-              color='black')
+    print("--- Done ---")
 
 if __name__ == '__main__':
     # ================= 使用说明 =================
-    # 1. 先运行 inspect_samples.py，记下你觉得好看的 ID。
-    # 2. 将 ID 填入下方函数中。
+    # 在这里指定你要重建的类别和 ID
+    # 程序会生成 原图PNG, 重构PNG, 原数据NPY, 重构数据NPY
     # ===========================================
     
-    cat_id = 11913    
-    clock_id = 7182   
+    target_category = 'apple'
+    target_id = 11913
     
-    # 使用 alpha=0.5 生成中间状态
-    main('apple', cat_id, 'clock', clock_id, alpha=0.4)
+    reconstruct_sample(target_category, target_id)
+    
+    # 你也可以一次跑多个
+    # reconstruct_sample('clock', 7182)
