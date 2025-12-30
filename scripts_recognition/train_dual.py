@@ -17,16 +17,23 @@ from utils import get_logger, strokes_to_5stroke, SketchTransformer, SketchResNe
 class LateFusionNetwork(nn.Module):
     def __init__(self, num_classes, seq_model, img_model):
         super(LateFusionNetwork, self).__init__()
-        self.seq_encoder = seq_model
-        if hasattr(self.seq_encoder, 'classifier'): self.seq_encoder.classifier = nn.Identity()
         
+        # 1. 序列分支处理
+        self.seq_encoder = seq_model
+        if hasattr(self.seq_encoder, 'classifier'): 
+            self.seq_encoder.classifier = nn.Identity()
+        
+        # 2. 图片分支处理
         self.img_encoder = img_model
-        # 注意：SketchResNet 包含 thickener 层，这层保留着没问题
-        if hasattr(self.img_encoder, 'backbone'): self.img_encoder.backbone.fc = nn.Identity()
-        elif hasattr(self.img_encoder, 'fc'): self.img_encoder.fc = nn.Identity()
+        if hasattr(self.img_encoder, 'backbone'): 
+            self.img_encoder.backbone.fc = nn.Identity()
+        elif hasattr(self.img_encoder, 'fc'): 
+            self.img_encoder.fc = nn.Identity()
 
+        # 3. 融合层
+        # 256 (Seq) + 512 (Img) = 768
         self.fusion_head = nn.Sequential(
-            nn.Linear(512 + 512, 512),
+            nn.Linear(256 + 512, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -36,7 +43,13 @@ class LateFusionNetwork(nn.Module):
     def forward(self, seq, img, padding_mask):
         feat_seq = self.seq_encoder(seq, src_key_padding_mask=padding_mask)
         feat_img = self.img_encoder(img)
-        return self.fusion_head(torch.cat((feat_seq, feat_img), dim=1))
+        
+        # 拼接
+        combined = torch.cat((feat_seq, feat_img), dim=1)
+        
+        # 最终分类
+        return self.fusion_head(combined)
+
 
 # ==========================================
 # 2. 双模态数据集
@@ -102,14 +115,12 @@ def train_fusion():
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # 【优化】DataLoader 参数
     train_ds = DualModalDataset('../data/QuickDraw414k', 'train', logger=logger)
     test_ds = DualModalDataset('../data/QuickDraw414k', 'test', logger=logger)
     train_loader = DataLoader(train_ds, batch_size=64, shuffle=True, collate_fn=collate_fn_dual, num_workers=8, pin_memory=True)
     test_loader = DataLoader(test_ds, batch_size=64, shuffle=False, collate_fn=collate_fn_dual, num_workers=8, pin_memory=True)
 
     logger.info("加载模型...")
-    # 这里会自动复用 utils.py 里定义的 SketchResNet (含 GPU 加粗)
     seq_model = SketchTransformer(len(train_ds.classes)).to(DEVICE)
     seq_model.load_state_dict(torch.load('../checkpoints/classifier_npy_best.pth', map_location=DEVICE))
     
@@ -166,5 +177,5 @@ def train_fusion():
             logger.info(f"Saved Best Dual Model: {test_acc:.2f}%")
 
 if __name__ == '__main__':
-
     train_fusion()
+

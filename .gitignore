@@ -11,3 +11,26 @@ logs/
 *.txt
 !requirements.txt
 __pycache__/
+# === 1. 忽略数据 ===
+data/QuickDraw414k/
+data/generated_results/
+*.npy
+*.png
+
+# === 2. 忽略模型权重 ===
+checkpoints/
+*.pth
+*.pt
+
+# === 3. 忽略系统垃圾和缓存 ===
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+venv/
+
+# === 4. 忽略日志 ===
+logs/
+*.log

@@ -7,15 +7,15 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 from torchvision import transforms
 from datetime import datetime
-import io # 用于内存读取
+import io 
 
-# 导入工具包
+# 工具
 from utils import get_logger, SketchResNet
 
 # ==========================================
 # 1. 数据集
 # ==========================================
-class FastSketchDataset(Dataset):
+class BalancedSketchDataset(Dataset):
     def __init__(self, data_root, mode='train', logger=None):
         self.base_dir = os.path.join(data_root, 'picture_files', mode)
         if not os.path.exists(self.base_dir): return
@@ -25,10 +25,9 @@ class FastSketchDataset(Dataset):
         self.class_to_idx = {c: i for i, c in enumerate(self.classes)}
         
         self.samples = []
-        # 训练集每类 5000 张，测试集 500 张
         limit = 5000 if mode == 'train' else 500
         
-        if logger: logger.info(f"[{mode}] 正在将图片加载到内存")
+        if logger: logger.info(f"[{mode}] 正在将图片加载到内存...")
         
         count = 0
         for cls_name in self.classes:
@@ -38,17 +37,16 @@ class FastSketchDataset(Dataset):
             
             for f in files[:limit]:
                 with open(f, 'rb') as img_f:
-                    # 读取二进制数据存入内存，而不是存 Image 对象（节省内存）
                     img_bytes = img_f.read()
                     self.samples.append((img_bytes, label))
                     count += 1
             
             if logger and count % 10000 == 0:
                 print(f"  已加载 {count} 张...", end='\r')
-                
+        
         if logger: logger.info(f"\n[{mode}] 加载完成! 共 {len(self.samples)} 张。")
             
-        self.img_size = 112 
+        self.img_size = 224
         
         self.transform = transforms.Compose([
             transforms.Resize((self.img_size, self.img_size)),
@@ -73,26 +71,25 @@ class FastSketchDataset(Dataset):
 # ==========================================
 # 2. 训练主程序
 # ==========================================
-def train_img_fast():
-    # 日志名加个 fast 标记
-    logger, _ = get_logger('../logs', name_prefix='train_img_fast_best') 
+def train_img_balanced():
+    # 日志名
+    logger, _ = get_logger('../logs', name_prefix='train_img_scratch_best') 
     logger.info(f"=== 单模态图片训练开始: {datetime.now()} ===")
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    BATCH_SIZE = 256 
+    BATCH_SIZE = 128 
     
-    train_ds = FastSketchDataset('../data/QuickDraw414k', 'train', logger)
-    test_ds = FastSketchDataset('../data/QuickDraw414k', 'test', logger)
+    train_ds = BalancedSketchDataset('../data/QuickDraw414k', 'train', logger)
+    test_ds = BalancedSketchDataset('../data/QuickDraw414k', 'test', logger)
     
     if len(train_ds) == 0: return
     
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=8, pin_memory=True)
+    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=8, pin_memory=True)
     
-    logger.info(f"Batch Size: {BATCH_SIZE} | Image Size: 112x112")
+    logger.info(f"Batch Size: {BATCH_SIZE} | Image Size: 224x224")
     
-    # 模型
     model = SketchResNet(len(train_ds.classes)).to(DEVICE)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-3)
@@ -110,7 +107,7 @@ def train_img_fast():
             imgs, labels = imgs.to(DEVICE), labels.to(DEVICE)
             
             optimizer.zero_grad()
-            out = model(imgs)
+            out = model(imgs) # GPU 加粗
             loss = criterion(out, labels)
             loss.backward()
             optimizer.step()
@@ -126,7 +123,6 @@ def train_img_fast():
         train_acc = 100 * correct / total
         avg_loss = total_loss / len(train_loader)
         
-        # 验证
         model.eval()
         test_correct = 0; test_total = 0
         with torch.no_grad():
@@ -139,13 +135,12 @@ def train_img_fast():
         test_acc = 100 * test_correct / test_total
         
         time_elapsed = datetime.now() - start_time
-        logger.info(f"Epoch {epoch+1} | Train: {train_acc:.2f}% | Test: {test_acc:.2f}% | Loss: {avg_loss:.4f}")
+        logger.info(f"Epoch {epoch+1} ({time_elapsed}) | Train: {train_acc:.2f}% | Test: {test_acc:.2f}% | Loss: {avg_loss:.4f}")
         
         if test_acc > best_acc:
             best_acc = test_acc
             torch.save(model.state_dict(), '../checkpoints/classifier_img_best.pth')
-            logger.info(f"Saved Best: {test_acc:.2f}%")
+            logger.info(f"Saved Best Model: {test_acc:.2f}%")
 
 if __name__ == '__main__':
-
-    train_img_fast()
+    train_img_balanced()
