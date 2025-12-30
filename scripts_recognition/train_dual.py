@@ -33,7 +33,7 @@ class LateFusionNetwork(nn.Module):
         # 3. 融合层
         # 256 (Seq) + 512 (Img) = 768
         self.fusion_head = nn.Sequential(
-            nn.Linear(256 + 512, 512),  # <--- 这里改成 256 + 512
+            nn.Linear(256 + 512, 512),
             nn.BatchNorm1d(512),
             nn.ReLU(),
             nn.Dropout(0.3),
@@ -178,3 +178,4 @@ def train_fusion():
 
 if __name__ == '__main__':
     train_fusion()
+
