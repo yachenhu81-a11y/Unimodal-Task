@@ -1,0 +1,7 @@
+# 核心深度学习框架
+torch>=1.13.0
+torchvision>=0.14.0
+
+# 基础科学计算与图像处理
+numpy
+Pillow
