@@ -72,6 +72,7 @@ class BalancedSketchDataset(Dataset):
 # 2. 训练主程序
 # ==========================================
 def train_img_balanced():
+    # 日志名
     logger, _ = get_logger('../logs', name_prefix='train_img_scratch_best') 
     logger.info(f"=== 单模态图片训练开始: {datetime.now()} ===")
     
@@ -96,7 +97,6 @@ def train_img_balanced():
     criterion = nn.CrossEntropyLoss()
     
     best_acc = 0.0
-    # 建议跑 20-30 轮
     for epoch in range(30):
         model.train()
         correct = 0; total = 0; total_loss = 0
