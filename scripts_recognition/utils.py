@@ -34,7 +34,6 @@ def get_logger(save_dir, name_prefix='train'):
 # ==========================================
 # 2. 预处理工具
 # ==========================================
-# 注意：这个类保留在这里只是为了兼容旧代码，新的训练脚本不再调用它了
 class ThickenLines(object):
     def __init__(self, radius=1): self.radius = radius
     def __call__(self, img): return img.filter(ImageFilter.MaxFilter(size=self.radius*2+1))
@@ -57,10 +56,9 @@ def strokes_to_5stroke(data, max_len=200):
     return result
 
 # ==========================================
-# 3. 模型定义 (集成 GPU 加速)
+# 3. 模型定义
 # ==========================================
 
-# --- 序列模型 (Transformer) ---
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -90,19 +88,15 @@ class SketchTransformer(nn.Module):
         output = output.mean(dim=1)
         return self.classifier(output)
 
-# --- 图片模型 (ResNet - GPU Accelerated) ---
+# --- 图片模型 ---
 class SketchResNet(nn.Module):
     def __init__(self, num_classes):
         super(SketchResNet, self).__init__()
         self.backbone = models.resnet18(weights=None)
         self.backbone.fc = nn.Linear(self.backbone.fc.in_features, num_classes)
         
-        # 【GPU 加速核心】
-        # 使用 MaxPool2d 代替 PIL.MaxFilter
-        # kernel_size=3, stride=1, padding=1 等效于半径为1的膨胀
         self.thickener = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
 
     def forward(self, x):
-        # x 在此处已经是 GPU 上的 Tensor 了，运算极快
         x = self.thickener(x)
         return self.backbone(x)
