@@ -69,17 +69,36 @@ def load_models(num_classes):
     return model_seq, model_img, model_dual
 
 def preprocess_img(path):
+    """
+    读取并处理图片
+    """
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
     ])
     try:
-        img = Image.open(path).convert('RGB')
+        img = Image.open(path)
+        
+        # 2. 强制转为灰度图 (L模式)
+        # 只保留亮度
+        img = img.convert('L')
+        
+        # 3. 二值化 (Binarization)
+        # 阈值设为 240 ，只要不是接近纯白的，都算作线
+        threshold = 240 
+        img = img.point(lambda p: 0 if p < threshold else 255)
+        
+        # 4. 颜色反转逻辑 (白底黑线 -> 黑底白线)
         if FORCE_INVERT:
             img = F.invert(img)
+            
+        # 5. 转回 RGB
+        img = img.convert('RGB')
+
         return transform(img).unsqueeze(0).to(DEVICE)
-    except Exception:
+    except Exception as e:
+        # print(f"图片处理出错: {path} {e}")
         return None
 
 def preprocess_seq(path):
@@ -188,4 +207,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
