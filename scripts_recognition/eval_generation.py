@@ -167,7 +167,7 @@ def main():
                 if is_correct: cls_correct += 1
                 cls_total += 1
                 
-                # === 打印单条结果 (核心修改) ===
+                # === 打印单条结果 ===
                 mark = "✅" if is_correct else "❌"
                 # 格式: ✅ [Dual] apple_0.png : apple -> apple (0.99)
                 # 格式: ❌ [Img ] apple_1.png : apple -> pear  (0.45)
@@ -188,3 +188,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
