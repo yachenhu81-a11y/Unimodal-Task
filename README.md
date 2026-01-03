@@ -59,9 +59,9 @@ pip install -r requirements.txt
 ### 3. 模型库
 由于 GitHub 文件大小限制，预训练模型权重请通过以下链接下载，并将草图识别模型放入 `checkpoints/` 目录，草图生成模型放入`scripts_generation/test_sketch/` 目录
 
-分享内容: classifier_npy_best.pth
+分享内容: classifier_npy_best.pth 等5个
 
-链接: https://pan.sjtu.edu.cn/web/share/6d8407098dfdbe95ea5fe22498196d49, 提取码: 1h3w
+链接: https://pan.sjtu.edu.cn/web/share/a5f827a6f537377104794eb162424a29, 提取码: 1y70
 
 ## 使用指南
 
