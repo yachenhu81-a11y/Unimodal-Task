@@ -33,7 +33,7 @@ Unimodal_Task/
 │   ├── reconstruct_samples.py      # 草图重建
 │   ├── interpolation.py            # 潜在空间插值生成
 │   ├── insmetric.py                # 实例级评估标准
-│   └── ...
+│   └── ... 
 │
 ├── README.md                       # 本文档
 └── requirements.txt                # 项目依赖
