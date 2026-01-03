@@ -8,6 +8,7 @@ GitHub仓库：https://github.com/yachenhu81-a11y/Unimodal-Task
 新颖评估体系：提出实例级评估指标，从多个维度量化生成草图的质量。
 完整实验验证：识别任务准确率达74.75%，重建任务平均得分0.898，深入分析了模型的有效性与局限性。
 项目结构概览
+、、、
 Unimodal_Task/
 │
 ├── data/
@@ -43,6 +44,7 @@ Unimodal_Task/
 │
 ├── README.md                        # 项目说明文档
 └── requirements.txt                 # 项目依赖列表
+、、、
 快速开始
 1. 环境配置
 克隆本仓库并安装所需依赖。
