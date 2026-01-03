@@ -67,7 +67,7 @@ pip install -r requirements.txt
 
 ### 任务A ：草图识别
 
-*1. 训练单模态基线**
+*1. 训练单模态基线*
 
 ```bash
 # 训练序列模型 (Transformer)
