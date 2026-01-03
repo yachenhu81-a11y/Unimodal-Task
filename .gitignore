@@ -10,7 +10,11 @@ logs/
 
 *.txt
 !requirements.txt
+check_data_shapes.py
+check_npy_shapes.py
 __pycache__/
+
+
 # === 1. 忽略数据 ===
 data/QuickDraw414k/
 data/generated_results/

@@ -16,19 +16,19 @@ class HParams():
         self.project_root = os.path.dirname(self.script_dir)
         self.data_dir = os.path.join(self.project_root, 'data', 'QuickDraw_generation')
         
-        # --- 修改：输出目录为 reconstruction ---
+        # 输出目录
         self.output_dir = os.path.join(self.script_dir, 'reconstruction')
         os.makedirs(self.output_dir, exist_ok=True)
         
         self.categories = ['cat', 'apple', 'bus', 'angel', 'clock', 'pig', 'sheep', 'umbrella'] 
         
-        # --- 模型参数 (保持一致) ---
+        # --- 模型参数 ---
         self.enc_hidden_size = 256
         self.dec_hidden_size = 512
         self.Nz = 128
         self.M = 20
         self.dropout = 0.9 
-        self.temperature = 0.4 # 重建时温度可以稍微低一点以求稳定，或者保持0.4增加多样性
+        self.temperature = 0.4 
         self.max_seq_length = 200
         
         self.load_epoch = 80000 
@@ -105,12 +105,13 @@ class ReconstructionModel():
 
     def generate_from_latent(self, z, scale_factor):
         """
-        解码潜变量 z，并进行反归一化。
-        返回格式: [N, 3] -> (Absolute_X, Absolute_Y, Pen_State)
+        解码并反归一化。
+        返回格式: [N, 4] -> (Absolute_X, Absolute_Y, Pen_Lift, Pen_EOS)
         """
         sos = torch.tensor([0,0,1,0,0], device=device).view(1,1,-1)
         s = sos
-        seq_x, seq_y, seq_z = [], [], []
+        seq_x, seq_y = [], []
+        seq_p2, seq_p3 = [], [] # p2: lift, p3: eos
         hidden_cell = None
         
         with torch.no_grad():
@@ -128,16 +129,20 @@ class ReconstructionModel():
                 
                 seq_x.append(dx_real)
                 seq_y.append(dy_real)
-                seq_z.append(pen_down)
+                # q_idx=1 -> Lift(p2), q_idx=2 -> EOS(p3)
+                seq_p2.append(1 if pen_down else 0)
+                seq_p3.append(1 if eos else 0)
                 
                 if eos: break
         
         # 计算绝对坐标
         x_sample = np.cumsum(seq_x, 0)
         y_sample = np.cumsum(seq_y, 0)
-        z_sample = np.array(seq_z)
+        p2_sample = np.array(seq_p2)
+        p3_sample = np.array(seq_p3)
         
-        return np.stack([x_sample, y_sample, z_sample]).T
+        # 组合成 (N, 4)
+        return np.column_stack([x_sample, y_sample, p2_sample, p3_sample])
 
     def sample_next_state(self):
         def adjust_temp(pi_pdf):
@@ -192,19 +197,20 @@ def prepare_data_dict():
     for cat in hp.categories:
         path = os.path.join(hp.data_dir, f'{cat}.npz')
         if os.path.exists(path):
+            # 加载原始数据
             raw = np.load(path, encoding='latin1', allow_pickle=True)['train']
             purified = purify(raw)
             all_raw_data.extend(purified)
             data_by_cat[cat] = purified
     
-    # Global Scale Factor
+    # Global Scale Factor (只使用前两列 delta_x, delta_y 计算)
     flat_data = []
     for seq in all_raw_data:
         flat_data.extend(seq[:, :2].flatten())
     scale_factor = np.std(flat_data)
     print(f"Global Scale Factor: {scale_factor:.4f}")
 
-    # Normalize data
+    # Normalize data (只归一化前两列)
     norm_data_by_cat = {}
     for cat, sequences in data_by_cat.items():
         norm_seqs = []
@@ -221,51 +227,55 @@ def make_tensor_input(sequence):
     Nmax = hp.max_seq_length
     new_seq = np.zeros((Nmax, 5))
     new_seq[:len_seq, :2] = sequence[:, :2]
-    new_seq[:len_seq-1, 2] = 1 - sequence[:-1, 2]
-    new_seq[:len_seq, 3] = sequence[:, 2]
-    new_seq[(len_seq-1):, 4] = 1
+    new_seq[:len_seq-1, 2] = 1 - sequence[:-1, 2] # p1: pen touching
+    new_seq[:len_seq, 3] = sequence[:, 2]         # p2: pen lifted
+    new_seq[(len_seq-1):, 4] = 1                  # p3: end of sequence (forced)
     new_seq[len_seq-1, 2:4] = 0
     return torch.from_numpy(new_seq).float().unsqueeze(1).to(device)
 
-def save_plot(sequence, filename, title, color='blue'):
+def save_plot(sequence, filename, title, color='white'):
     """
-    输入: [N, 3] 绝对坐标 (x, y, pen)
+    输入: [N, 4] 或 [N, 3] 绝对坐标
+    修改：黑底白线，去标题
     """
     abs_x = sequence[:, 0]
     abs_y = sequence[:, 1]
-    pen_states = sequence[:, 2]
+    pen_states = sequence[:, 2] # 使用第3列作为断笔标志
 
     split_indices = np.where(pen_states > 0)[0] + 1
     strokes = np.split(np.stack([abs_x, abs_y], axis=1), split_indices)
     
-    fig = plt.figure(figsize=(5,5))
+    # 1. 设置黑色背景的 Figure
+    fig = plt.figure(figsize=(5,5), facecolor='black')
     ax = fig.add_subplot(111)
+    
     for s in strokes:
         if len(s) > 0:
-            # Y轴加负号
+            # 2. 线条颜色由参数 color 控制 (默认 white)
             plt.plot(s[:, 0], -s[:, 1], color=color, linewidth=2)
-    plt.title(title)
+    
+    # 3. 删除标题
+    # plt.title(title) <--- 已注释/删除
+
     plt.axis('equal')
     plt.axis('off')
     
     save_path = os.path.join(hp.output_dir, filename)
-    plt.savefig(save_path)
+    # 4. 保存时确保背景色为黑色
+    plt.savefig(save_path, facecolor='black') 
     plt.close()
     print(f"Image Saved: {save_path}")
 
 def save_npy(sequence, filename):
     """
     保存为 npy 文件
-    输入: [N, 3] 绝对坐标
     """
     save_path = os.path.join(hp.output_dir, filename)
     np.save(save_path, sequence)
-    print(f"Data Saved: {save_path}")
+    print(f"Data Saved ({sequence.shape}): {save_path}")
 
 ################################# Main Reconstruction Logic
 def reconstruct_sample(cat_name, idx):
-    # 1. 准备数据和缩放因子
-    # 注意：这里会重新加载数据计算scale factor，虽然有点慢但保证准确
     if not hasattr(reconstruct_sample, "data_cache"):
          reconstruct_sample.data_cache = prepare_data_dict()
     data_dict, scale_factor = reconstruct_sample.data_cache
@@ -275,72 +285,63 @@ def reconstruct_sample(cat_name, idx):
         return
     
     if idx >= len(data_dict[cat_name]):
-        print(f"Error: Index {idx} out of range for {cat_name}.")
+        print(f"Error: Index {idx} out of range.")
         return
 
     print(f"\nProcessing: {cat_name} (ID: {idx})")
 
-    # 2. 获取原始数据 (Normalized)
+    # 1. 获取原始数据 (归一化的)
     seq_norm = data_dict[cat_name][idx] 
     
-    # 3. 转换为 Tensor 输入模型
+    # 2. 模型推理 (Encode -> Decode)
     input_tensor = make_tensor_input(seq_norm)
-
-    # 4. 加载模型
     model = ReconstructionModel()
     if not model.load(hp.load_epoch):
         return
 
-    # 5. 模型推理 (Encode -> Decode)
     with torch.no_grad():
         z, _ = model.encoder(input_tensor, 1)
-        # 生成重建数据 (已包含反归一化和Cumsum，结果为绝对坐标)
+        # 生成重建数据 (N, 4) [x, y, p_lift, p_eos]
         recon_absolute = model.generate_from_latent(z, scale_factor)
 
-    # 6. 处理原始数据用于保存 (Norm Delta -> Real Delta -> Real Absolute)
+    # 3. 处理原始数据用于保存 (Norm Delta -> Real Absolute)
     def denormalize_to_absolute(norm_seq, scale):
         real_seq = norm_seq.copy()
         real_seq[:, :2] *= scale # 反归一化
+        
         abs_x = np.cumsum(real_seq[:, 0])
         abs_y = np.cumsum(real_seq[:, 1])
-        return np.stack([abs_x, abs_y, real_seq[:, 2]], axis=1)
+        
+        if norm_seq.shape[1] >= 4:
+            return np.column_stack([abs_x, abs_y, real_seq[:, 2], real_seq[:, 3]])
+        else:
+            p_eos = np.zeros(len(abs_x))
+            p_eos[-1] = 1 
+            return np.column_stack([abs_x, abs_y, real_seq[:, 2], p_eos])
 
     orig_absolute = denormalize_to_absolute(seq_norm, scale_factor)
 
-    # 7. 保存文件 (4个文件)
-    # 文件名基础
+    # 4. 保存文件
     base_name = f"{cat_name}_id{idx}"
 
-    # A. 保存原始数据 npy (绝对坐标)
     save_npy(orig_absolute, f"original_{base_name}.npy")
-    
-    # B. 保存重构数据 npy (绝对坐标)
     save_npy(recon_absolute, f"recon_{base_name}.npy")
     
-    # C. 保存原始图片 png
+    # 这里 color='white' 配合 save_plot 中的黑底，实现黑底白线
     save_plot(orig_absolute, 
               f"original_{base_name}.png", 
               f"Original: {cat_name} (ID:{idx})", 
-              color='black')
+              color='white')
               
-    # D. 保存重构图片 png
     save_plot(recon_absolute, 
               f"recon_{base_name}.png", 
               f"Reconstruction: {cat_name} (ID:{idx})", 
-              color='green')
+              color='white')
 
     print("--- Done ---")
 
 if __name__ == '__main__':
-    # ================= 使用说明 =================
-    # 在这里指定你要重建的类别和 ID
-    # 程序会生成 原图PNG, 重构PNG, 原数据NPY, 重构数据NPY
-    # ===========================================
-    
     target_category = 'apple'
     target_id = 11913
     
     reconstruct_sample(target_category, target_id)
-    
-    # 你也可以一次跑多个
-    # reconstruct_sample('clock', 7182)
