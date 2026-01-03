@@ -10,33 +10,39 @@ GitHub仓库：https://github.com/yachenhu81-a11y/Unimodal-Task
 项目结构概览
 Unimodal_Task/
 │
-├── data/                           # 数据目录
-│   ├── QuickDraw414k/              # 原始数据集 (.npy, .png)
-│   └── generated_results/          # 生成的草图
+├── data/
+│   ├── QuickDraw414k/               # 原始数据集 (.npy, .png)
+│   └── generated_results/           # 生成的草图
 │
-├── checkpoints/                    # 预训练模型仓库 (.pth)
-│   ├── classifier_npy_best.pth     # 序列单模态分类模型
-│   ├── classifier_img_best.pth     # 图像单模态分类模型
-│   ├── classifier_dual_best.pth    # 双模态融合模型
+├── checkpoints/                     # 预训练模型 (.pth文件)
+│   ├── classifier_npy_best.pth      # 序列单模态模型
+│   ├── classifier_img_best.pth      # 图片单模态模型
+│   ├── classifier_dual_best.pth     # 双模态融合模型
 │   └── ...                         # 生成模型
 │
-├── logs/                           # 训练日志
+├── logs/                            # 训练日志
 │
-├── scripts_recognition/            # A. 识别任务脚本
-│   ├── train_npy.py                # 训练序列单模态模型
-│   ├── train_img.py                # 训练图像单模态模型
-│   ├── train_dual.py               # 训练双模态融合模型
-│   └── ...
+├── scripts_recognition/             # A. 识别任务脚本
+│   ├── utils.py
+│   ├── train_npy.py                 # 训练序列单模态
+│   ├── train_img.py                 # 训练图片单模态
+│   ├── train_dual.py                # 训练双模态
+│   └── eval_generation.py
 │
-├── scripts_generation/             # B. 生成任务脚本
-│   ├── sketch_rnn.py               # 训练生成模型
-│   ├── reconstruct_samples.py      # 草图重建
-│   ├── interpolation.py            # 潜在空间插值生成
-│   ├── insmetric.py                # 实例级评估标准
-│   └── ... 
+├── scripts_generation/              # B. 生成任务脚本
+│   ├── interpolation/               # 插值生成结果
+│   ├── reconstruction/              # 重建生成结果
+│   ├── insmetric.py                 # 实例级评估标准
+│   ├── inspect_samples.py           # 检查原始图片
+│   ├── interpolation.py             # 执行插值生成
+│   ├── reconstruct_samples.py        # 执行图片重建
+│   ├── sketch_rnn.py                # 训练生成模型
+│   └── test_sketch/                 # 生成模型检查点
+│       ├── decoder_epoch_80000.pth
+│       └── encoder_epoch_80000.pth
 │
-├── README.md                       # 本文档
-└── requirements.txt                # 项目依赖
+├── README.md                        # 项目说明文档
+└── requirements.txt                 # 项目依赖列表
 快速开始
 1. 环境配置
 克隆本仓库并安装所需依赖。
